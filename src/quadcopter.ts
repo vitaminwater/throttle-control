@@ -10,6 +10,8 @@ const HOVER_ALTITUDE = 2;
 const MIN_ALTITUDE = 0.6;
 const MAX_ALTITUDE = 6;
 const CLIMB_SPEED = 2.5;
+const CAMERA_HEIGHT_OFFSET = 1.2;
+const CAMERA_DISTANCE = 7;
 
 export class QuadcopterScene {
   readonly container: HTMLElement;
@@ -17,7 +19,7 @@ export class QuadcopterScene {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private drone: THREE.Group;
-  private propellers: THREE.Mesh[] = [];
+  private propellers: THREE.Group[] = [];
   private animationId = 0;
 
   private yawAngle = 0;
@@ -35,7 +37,7 @@ export class QuadcopterScene {
       0.1,
       100,
     );
-    this.camera.position.set(0, HOVER_ALTITUDE + 0.5, 7);
+    this.camera.position.set(0, HOVER_ALTITUDE + CAMERA_HEIGHT_OFFSET, CAMERA_DISTANCE);
     this.camera.lookAt(0, HOVER_ALTITUDE, 0);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -64,10 +66,10 @@ export class QuadcopterScene {
 
     const propSpeed = 0.4 + Math.abs(state.throttlePosition - TARGET_THROTTLE) * 1.2 + 0.5;
     for (const prop of this.propellers) {
-      prop.rotation.z += propSpeed;
+      prop.rotation.y += propSpeed;
     }
 
-    this.camera.position.set(0, this.altitude + 0.5, 7);
+    this.camera.position.set(0, this.altitude + CAMERA_HEIGHT_OFFSET, CAMERA_DISTANCE);
     this.camera.lookAt(0, this.altitude, 0);
   }
 
@@ -191,29 +193,40 @@ export class QuadcopterScene {
     group.add(nose);
 
     const armPositions: [number, number][] = [
-      [1, 1],
-      [-1, 1],
-      [-1, -1],
       [1, -1],
+      [-1, -1],
+      [-1, 1],
+      [1, 1],
     ];
 
     for (const [sx, sz] of armPositions) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.06), armMat);
+      const mx = sx * 0.85;
+      const mz = sz * 0.85;
+      const angle = Math.atan2(sx, sz);
+
+      // Length along Z — rotate to point at motor
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.9), armMat);
       arm.position.set(sx * 0.45, 0, sz * 0.45);
-      arm.rotation.y = Math.atan2(sz, sx);
+      arm.rotation.y = angle;
       arm.castShadow = true;
       group.add(arm);
 
       const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 16), motorMat);
-      motor.position.set(sx * 0.85, 0.05, sz * 0.85);
+      motor.position.set(mx, 0.05, mz);
       motor.castShadow = true;
       group.add(motor);
 
-      const prop = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.015, 0.06), propMat);
-      prop.position.set(sx * 0.85, 0.12, sz * 0.85);
-      prop.rotation.y = Math.atan2(sz, sx);
-      this.propellers.push(prop);
-      group.add(prop);
+      const propHub = new THREE.Group();
+      propHub.position.set(mx, 0.12, mz);
+
+      const bladeGeo = new THREE.BoxGeometry(0.55, 0.012, 0.08);
+      const bladeA = new THREE.Mesh(bladeGeo, propMat);
+      const bladeB = new THREE.Mesh(bladeGeo, propMat);
+      bladeB.rotation.y = Math.PI / 2;
+      propHub.add(bladeA, bladeB);
+
+      this.propellers.push(propHub);
+      group.add(propHub);
     }
 
     group.position.y = this.altitude;
