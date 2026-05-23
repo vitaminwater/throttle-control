@@ -1,6 +1,5 @@
 import {
   CalibrationSession,
-  getCalHoldDuration,
   type ChannelMapping,
 } from "./calibration";
 import { GameSession, MATCH_HOLD } from "./game";
@@ -124,8 +123,6 @@ export function initApp(root: HTMLElement): () => void {
   const overlayScore = root.querySelector("#overlay-score") as HTMLElement;
   const btnStart = root.querySelector("#btn-start") as HTMLButtonElement;
 
-  const calHoldDuration = getCalHoldDuration();
-
   const syncIntroUI = (): void => {
     const gp = inputManager.getGamepadState();
     introHint.textContent = gp.connected
@@ -136,15 +133,16 @@ export function initApp(root: HTMLElement): () => void {
   const syncCalibrationUI = (): void => {
     if (!calibration) return;
 
-    calStep.textContent = calibration.step === "yaw" ? "Step 2 of 2" : "Step 1 of 2";
+    calStep.textContent = calibration.getStepLabel();
     calText.textContent = calibration.getInstruction();
 
     const gp = inputManager.getGamepadState();
     calHint.textContent = gp.connected
-      ? "Keep the stick at 100% until the bar fills."
+      ? calibration.getHint()
       : "Connect your controller and move a stick to activate it.";
 
-    calProgressFill.style.width = `${(calibration.holdProgress / calHoldDuration) * 100}%`;
+    const target = calibration.getHoldTarget();
+    calProgressFill.style.width = `${(calibration.holdProgress / target) * 100}%`;
   };
 
   const finishCalibration = (mapping: ChannelMapping): void => {
