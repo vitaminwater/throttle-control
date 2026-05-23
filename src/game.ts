@@ -45,15 +45,15 @@ export class GameSession {
     this.ghost = null;
   }
 
-  update(dt: number, input: ProcessedInput, player: PlayerState): void {
-    if (this.phase !== "playing") return;
+  update(dt: number, input: ProcessedInput, player: PlayerState): boolean {
+    if (this.phase !== "playing") return false;
 
     this.timeLeft = Math.max(0, this.timeLeft - dt);
     if (this.timeLeft <= 0) {
       this.phase = "finished";
       this.penalizing = false;
       this.aligning = false;
-      return;
+      return false;
     }
 
     if (!this.ghost) {
@@ -81,11 +81,14 @@ export class GameSession {
         this.ghostsMatched += 1;
         this.matchHold = 0;
         setNextGhostTarget(this.ghost);
+        return true;
       }
     } else {
       this.matchHold = 0;
       this.aligning = false;
     }
+
+    return false;
   }
 
   private moveGhost(dt: number): void {

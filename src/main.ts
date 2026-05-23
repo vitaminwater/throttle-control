@@ -45,6 +45,13 @@ export function initApp(root: HTMLElement): () => void {
         <span class="score-value" id="val-matched">0</span>
       </div>
     </div>
+    <div id="match-hold" class="match-hold is-hidden">
+      <div class="match-hold-ring" id="match-hold-ring"></div>
+      <div class="match-hold-inner">
+        <span class="match-hold-label">Hold</span>
+        <span class="match-hold-time" id="match-hold-time">3.0s</span>
+      </div>
+    </div>
     <div id="hud">
       <p class="goal">Match the <strong>ghost</strong> — same height and facing</p>
       <div class="hud-row">
@@ -134,6 +141,9 @@ export function initApp(root: HTMLElement): () => void {
   const valScore = root.querySelector("#val-score") as HTMLElement;
   const valMatched = root.querySelector("#val-matched") as HTMLElement;
   const barMarker = root.querySelector("#bar-marker") as HTMLElement;
+  const matchHoldEl = root.querySelector("#match-hold") as HTMLElement;
+  const matchHoldRing = root.querySelector("#match-hold-ring") as HTMLElement;
+  const matchHoldTime = root.querySelector("#match-hold-time") as HTMLElement;
 
   const overlayIntro = root.querySelector("#overlay-intro") as HTMLElement;
   const introHint = root.querySelector("#intro-hint") as HTMLElement;
@@ -266,16 +276,22 @@ export function initApp(root: HTMLElement): () => void {
     if (setupPhase !== "ready") return;
 
     if (game.phase !== "playing") {
+      matchHoldEl.classList.add("is-hidden");
       valStatus.textContent = gp.connected ? "Ready" : "W/S throttle · A/D yaw";
       valAltError.textContent = "—";
       valYawError.textContent = "—";
     } else if (game.aligning) {
-      valStatus.textContent = `Hold steady… ${Math.max(0, MATCH_HOLD - game.matchHold).toFixed(1)}s`;
+      const remaining = Math.max(0, MATCH_HOLD - game.matchHold);
+      valStatus.textContent = `Hold steady… ${remaining.toFixed(1)}s`;
       valAltError.textContent = game.altError.toFixed(2) + "m";
       valAltError.className = "stat-value good";
       valYawError.textContent = radToDeg(game.yawError);
       valYawError.className = "stat-value good";
+      matchHoldEl.classList.remove("is-hidden");
+      matchHoldRing.style.setProperty("--progress", String(game.matchHold / MATCH_HOLD));
+      matchHoldTime.textContent = `${remaining.toFixed(1)}s`;
     } else if (game.ghost) {
+      matchHoldEl.classList.add("is-hidden");
       valStatus.textContent = game.penalizing ? "− Points" : "Align to ghost";
       valAltError.textContent = game.altError.toFixed(2) + "m";
       valAltError.className = `stat-value ${game.altError <= 0.25 ? "good" : game.altError <= 0.6 ? "warn" : "bad"}`;
@@ -332,8 +348,15 @@ export function initApp(root: HTMLElement): () => void {
     );
 
     if (setupPhase === "ready") {
-      game.update(dt, input, scene.getPlayerState());
+      const matched = game.update(dt, input, scene.getPlayerState());
       scene.setGhostTarget(game.ghost);
+      scene.setMatchFeedback(
+        game.aligning,
+        game.phase === "playing" ? game.matchHold / MATCH_HOLD : 0,
+      );
+      if (matched) {
+        scene.triggerMatchCelebration();
+      }
 
       if (game.phase === "finished" && prevPhase === "playing") {
         syncOverlay();

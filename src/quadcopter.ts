@@ -36,6 +36,15 @@ export class QuadcopterScene {
   private yawAngle = 0;
   private altitude = HOVER_ALTITUDE;
   private ghostTarget: GhostTarget | null = null;
+  private holdRing: THREE.Mesh | null = null;
+  private alignRingPlayer: THREE.Mesh;
+  private alignRingGhost: THREE.Mesh;
+  private matchParticles: THREE.Points;
+  private particlePositions: Float32Array;
+  private particleVelocities: Float32Array;
+  private particleLifetimes: Float32Array;
+  private particleTime = 0;
+  private alignPulse = 0;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -66,6 +75,30 @@ export class QuadcopterScene {
     this.scene.add(this.drone);
     this.scene.add(this.ghost);
 
+    this.alignRingPlayer = this.createAlignRing(0x4ade80);
+    this.alignRingGhost = this.createAlignRing(0x4fc3f7);
+    this.drone.add(this.alignRingPlayer);
+    this.ghost.add(this.alignRingGhost);
+
+    const particleCount = 80;
+    this.particlePositions = new Float32Array(particleCount * 3);
+    this.particleVelocities = new Float32Array(particleCount * 3);
+    this.particleLifetimes = new Float32Array(particleCount);
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute("position", new THREE.BufferAttribute(this.particlePositions, 3));
+    this.matchParticles = new THREE.Points(
+      particleGeo,
+      new THREE.PointsMaterial({
+        color: 0x4ade80,
+        size: 0.12,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    this.scene.add(this.matchParticles);
+
     window.addEventListener("resize", this.onResize);
     this.animate();
   }
@@ -83,6 +116,48 @@ export class QuadcopterScene {
     this.ghost.visible = true;
     this.ghost.position.y = target.altitude;
     this.ghost.rotation.y = target.yaw;
+  }
+
+  setMatchFeedback(aligning: boolean, holdProgress: number): void {
+    const progress = Math.min(1, Math.max(0, holdProgress));
+    this.alignRingPlayer.visible = aligning;
+    this.alignRingGhost.visible = aligning;
+
+    if (aligning) {
+      this.alignPulse += 0.08;
+      const pulse = 0.55 + Math.sin(this.alignPulse) * 0.2;
+      (this.alignRingPlayer.material as THREE.MeshBasicMaterial).opacity = pulse;
+      (this.alignRingGhost.material as THREE.MeshBasicMaterial).opacity = pulse * 0.7;
+      this.updateHoldRing(progress);
+    } else {
+      this.clearHoldRing();
+    }
+  }
+
+  triggerMatchCelebration(): void {
+    const origin = new THREE.Vector3(
+      (this.drone.position.x + this.ghost.position.x) / 2,
+      (this.drone.position.y + this.ghost.position.y) / 2 + 0.2,
+      (this.drone.position.z + this.ghost.position.z) / 2,
+    );
+
+    for (let i = 0; i < this.particleLifetimes.length; i++) {
+      const i3 = i * 3;
+      this.particlePositions[i3] = origin.x + (Math.random() - 0.5) * 0.3;
+      this.particlePositions[i3 + 1] = origin.y + (Math.random() - 0.5) * 0.2;
+      this.particlePositions[i3 + 2] = origin.z + (Math.random() - 0.5) * 0.3;
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2.5;
+      this.particleVelocities[i3] = Math.cos(angle) * speed;
+      this.particleVelocities[i3 + 1] = 0.8 + Math.random() * 2.2;
+      this.particleVelocities[i3 + 2] = Math.sin(angle) * speed;
+      this.particleLifetimes[i] = 0.45 + Math.random() * 0.55;
+    }
+
+    this.particleTime = 0;
+    (this.matchParticles.material as THREE.PointsMaterial).opacity = 1;
+    this.matchParticles.geometry.attributes.position.needsUpdate = true;
   }
 
   update(state: DroneState, dt: number): void {
@@ -109,6 +184,8 @@ export class QuadcopterScene {
       : this.altitude;
     this.camera.position.set(0, lookY + CAMERA_HEIGHT_OFFSET, CAMERA_DISTANCE);
     this.camera.lookAt(0, lookY, 0);
+
+    this.updateParticles(dt);
   }
 
   dispose(): void {
@@ -219,6 +296,76 @@ export class QuadcopterScene {
     }
 
     return group;
+  }
+
+  private createAlignRing(color: number): THREE.Mesh {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.72, 48),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = -0.08;
+    ring.visible = false;
+    return ring;
+  }
+
+  private updateHoldRing(progress: number): void {
+    this.clearHoldRing();
+    if (progress <= 0) return;
+
+    const start = -Math.PI / 2;
+    this.holdRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.78, 0.95, 64, 1, start, Math.PI * 2 * progress),
+      new THREE.MeshBasicMaterial({
+        color: 0x4ade80,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    this.holdRing.rotation.x = -Math.PI / 2;
+    this.holdRing.position.y = -0.06;
+    this.drone.add(this.holdRing);
+  }
+
+  private clearHoldRing(): void {
+    if (!this.holdRing) return;
+    this.drone.remove(this.holdRing);
+    this.holdRing.geometry.dispose();
+    (this.holdRing.material as THREE.Material).dispose();
+    this.holdRing = null;
+  }
+
+  private updateParticles(dt: number): void {
+    const mat = this.matchParticles.material as THREE.PointsMaterial;
+    let anyAlive = false;
+
+    for (let i = 0; i < this.particleLifetimes.length; i++) {
+      if (this.particleLifetimes[i] <= 0) continue;
+
+      this.particleLifetimes[i] -= dt;
+      const i3 = i * 3;
+      this.particlePositions[i3] += this.particleVelocities[i3] * dt;
+      this.particlePositions[i3 + 1] += this.particleVelocities[i3 + 1] * dt;
+      this.particlePositions[i3 + 2] += this.particleVelocities[i3 + 2] * dt;
+      this.particleVelocities[i3 + 1] -= 2.5 * dt;
+      anyAlive = true;
+    }
+
+    if (anyAlive) {
+      this.particleTime += dt;
+      mat.opacity = Math.max(0, 1 - this.particleTime / 1.1);
+      this.matchParticles.geometry.attributes.position.needsUpdate = true;
+    } else {
+      mat.opacity = 0;
+    }
   }
 
   private createSkyGradient(): THREE.Color {

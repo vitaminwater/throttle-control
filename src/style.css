@@ -87,6 +87,74 @@ body {
   color: var(--bad);
 }
 
+.match-hold {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: 72px;
+  height: 72px;
+}
+
+.match-hold.is-hidden {
+  display: none;
+}
+
+.match-hold-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--good) calc(var(--progress, 0) * 360deg),
+    rgba(255, 255, 255, 0.12) 0
+  );
+  animation: match-pulse 1.2s ease-in-out infinite;
+}
+
+.match-hold-ring::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+}
+
+.match-hold-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.match-hold-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--good);
+}
+
+.match-hold-time {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+@keyframes match-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.35));
+  }
+  50% {
+    filter: drop-shadow(0 0 14px rgba(74, 222, 128, 0.75));
+  }
+}
+
 .overlay {
   position: absolute;
   inset: 0;
