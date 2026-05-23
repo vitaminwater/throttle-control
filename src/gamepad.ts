@@ -1,3 +1,5 @@
+import type { ChannelMapping } from "./calibration";
+
 export interface StickInput {
   throttle: number;
   yaw: number;
@@ -32,30 +34,33 @@ function normalizeAxis(value: number): number {
   return clamp(applyDeadzone(value), -1, 1);
 }
 
-/** Throttle uses raw axis — no deadzone, stick may not self-center. */
 function readThrottle(raw: number): number {
   return clamp(raw, -1, 1);
 }
 
-/**
- * RC channel mapping:
- *   CH3 (axis 2) = throttle
- *   CH4 (axis 3) = yaw
- */
-function readGamepadAxes(gamepad: Gamepad): StickInput {
+function readMappedAxis(axes: readonly number[], index: number, invert: boolean): number {
+  const raw = axes[index] ?? 0;
+  return invert ? -raw : raw;
+}
+
+function readGamepadAxes(gamepad: Gamepad, mapping: ChannelMapping): StickInput {
   const axes = gamepad.axes;
 
   return {
-    yaw: normalizeAxis(-(axes[2] ?? 0)),
-    throttle: readThrottle(axes[4] ?? 0),
+    throttle: readThrottle(
+      readMappedAxis(axes, mapping.throttleAxis, mapping.throttleInvert),
+    ),
+    yaw: normalizeAxis(readMappedAxis(axes, mapping.yawAxis, mapping.yawInvert)),
   };
 }
 
 export class InputManager {
+  private mapping: ChannelMapping | null;
   private keyboardInput: StickInput = { throttle: 0, yaw: 0 };
   private keysDown = new Set<string>();
 
-  constructor() {
+  constructor(mapping: ChannelMapping | null = null) {
+    this.mapping = mapping;
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", this.onBlur);
@@ -65,6 +70,14 @@ export class InputManager {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("blur", this.onBlur);
+  }
+
+  hasMapping(): boolean {
+    return this.mapping !== null;
+  }
+
+  setMapping(mapping: ChannelMapping): void {
+    this.mapping = mapping;
   }
 
   getActiveGamepad(): Gamepad | null {
@@ -85,7 +98,13 @@ export class InputManager {
 
   poll(): ProcessedInput {
     const gp = this.getActiveGamepad();
-    const input = gp ? readGamepadAxes(gp) : { ...this.keyboardInput };
+    let input: StickInput;
+
+    if (gp && this.mapping) {
+      input = readGamepadAxes(gp, this.mapping);
+    } else {
+      input = { ...this.keyboardInput };
+    }
 
     const throttlePosition = (input.throttle + 1) / 2;
     const throttleDeviation = throttlePosition - TARGET_THROTTLE;

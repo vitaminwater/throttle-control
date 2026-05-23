@@ -1,3 +1,8 @@
+import {
+  CalibrationSession,
+  getCalHoldDuration,
+  loadMapping,
+} from "./calibration";
 import { GameSession, MATCH_HOLD } from "./game";
 import { InputManager, type ProcessedInput } from "./gamepad";
 import { QuadcopterScene } from "./quadcopter";
@@ -12,6 +17,9 @@ function radToDeg(rad: number): string {
 }
 
 export function initApp(root: HTMLElement): () => void {
+  const savedMapping = loadMapping();
+  let calibrating = savedMapping === null;
+
   root.innerHTML = `
     <div id="canvas-container"></div>
     <div id="scoreboard">
@@ -59,7 +67,18 @@ export function initApp(root: HTMLElement): () => void {
         <div id="bar-marker" class="bar-marker"></div>
       </div>
     </div>
-    <div id="overlay" class="overlay">
+    <div id="overlay-cal" class="overlay${calibrating ? "" : " is-hidden"}">
+      <div class="overlay-card">
+        <h1>Controller Setup</h1>
+        <p class="cal-step" id="cal-step">Step 1 of 2</p>
+        <p id="cal-text">Move your throttle stick to 100% and hold it.</p>
+        <p class="cal-hint" id="cal-hint">Connect your controller and move a stick to activate it.</p>
+        <div class="cal-progress">
+          <div id="cal-progress-fill" class="cal-progress-fill"></div>
+        </div>
+      </div>
+    </div>
+    <div id="overlay" class="overlay${calibrating ? " is-hidden" : ""}">
       <div class="overlay-card">
         <h1>Throttle Hold</h1>
         <p id="overlay-text">Fly to the ghost drone and match its height and rotation. Hold for ${MATCH_HOLD} seconds to score.</p>
@@ -70,7 +89,8 @@ export function initApp(root: HTMLElement): () => void {
   `;
 
   const canvasContainer = root.querySelector("#canvas-container") as HTMLElement;
-  const inputManager = new InputManager();
+  const inputManager = new InputManager(savedMapping);
+  const calibration = calibrating ? new CalibrationSession() : null;
   const scene = new QuadcopterScene(canvasContainer);
   const game = new GameSession();
 
@@ -82,12 +102,43 @@ export function initApp(root: HTMLElement): () => void {
   const valScore = root.querySelector("#val-score") as HTMLElement;
   const valMatched = root.querySelector("#val-matched") as HTMLElement;
   const barMarker = root.querySelector("#bar-marker") as HTMLElement;
+  const overlayCal = root.querySelector("#overlay-cal") as HTMLElement;
+  const calStep = root.querySelector("#cal-step") as HTMLElement;
+  const calText = root.querySelector("#cal-text") as HTMLElement;
+  const calHint = root.querySelector("#cal-hint") as HTMLElement;
+  const calProgressFill = root.querySelector("#cal-progress-fill") as HTMLElement;
   const overlay = root.querySelector("#overlay") as HTMLElement;
   const overlayText = root.querySelector("#overlay-text") as HTMLElement;
   const overlayScore = root.querySelector("#overlay-score") as HTMLElement;
   const btnStart = root.querySelector("#btn-start") as HTMLButtonElement;
 
+  const calHoldDuration = getCalHoldDuration();
+
+  const syncCalibrationUI = (): void => {
+    if (!calibrating || !calibration) return;
+
+    calStep.textContent = calibration.step === "yaw" ? "Step 2 of 2" : "Step 1 of 2";
+    calText.textContent = calibration.getInstruction();
+
+    const gp = inputManager.getGamepadState();
+    calHint.textContent = gp.connected
+      ? "Keep the stick at 100% until the bar fills."
+      : "Connect your controller and move a stick to activate it.";
+
+    calProgressFill.style.width = `${(calibration.holdProgress / calHoldDuration) * 100}%`;
+  };
+
+  const finishCalibration = (mapping: ReturnType<typeof loadMapping>): void => {
+    if (!mapping) return;
+    inputManager.setMapping(mapping);
+    calibrating = false;
+    overlayCal.classList.add("is-hidden");
+    overlay.classList.remove("is-hidden");
+  };
+
   const syncOverlay = (): void => {
+    if (calibrating) return;
+
     const show = game.phase === "idle" || game.phase === "finished";
     overlay.classList.toggle("is-hidden", !show);
 
@@ -109,6 +160,7 @@ export function initApp(root: HTMLElement): () => void {
   let prevPhase = game.phase;
 
   syncOverlay();
+  syncCalibrationUI();
 
   btnStart.addEventListener("click", (e) => {
     e.preventDefault();
@@ -119,6 +171,11 @@ export function initApp(root: HTMLElement): () => void {
   });
 
   const updateUI = (input: ProcessedInput): void => {
+    if (calibrating) {
+      syncCalibrationUI();
+      return;
+    }
+
     const gp = inputManager.getGamepadState();
 
     if (game.phase !== "playing") {
@@ -156,24 +213,34 @@ export function initApp(root: HTMLElement): () => void {
     const dt = Math.min((time - lastTime) / 1000, 0.05);
     lastTime = time;
 
+    if (calibrating && calibration) {
+      const mapping = calibration.update(dt, inputManager.getActiveGamepad());
+      if (mapping) {
+        finishCalibration(mapping);
+      }
+      syncCalibrationUI();
+    }
+
     const input = inputManager.poll();
 
     scene.update(
       {
-        yaw: input.yaw,
-        throttlePosition: input.throttlePosition,
+        yaw: calibrating ? 0 : input.yaw,
+        throttlePosition: calibrating ? 0.5 : input.throttlePosition,
       },
       dt,
     );
 
-    const player = scene.getPlayerState();
-    game.update(dt, input, player);
-    scene.setGhostTarget(game.ghost);
+    if (!calibrating) {
+      const player = scene.getPlayerState();
+      game.update(dt, input, player);
+      scene.setGhostTarget(game.ghost);
 
-    if (game.phase === "finished" && prevPhase === "playing") {
-      syncOverlay();
+      if (game.phase === "finished" && prevPhase === "playing") {
+        syncOverlay();
+      }
+      prevPhase = game.phase;
     }
-    prevPhase = game.phase;
 
     updateUI(input);
     frameId = requestAnimationFrame(loop);
