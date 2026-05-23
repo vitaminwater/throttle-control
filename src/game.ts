@@ -6,6 +6,8 @@ const MAX_PENALTY_PER_SECOND = 25;
 const MAX_DEVIATION = 0.5;
 export const ALT_MATCH = 0.08;
 export const YAW_MATCH = 0.06;
+export const MAX_MATCH_VERTICAL_SPEED = 0.12;
+export const MAX_MATCH_YAW_RATE = 0.05;
 export const MATCH_HOLD = 3;
 const MATCH_POINTS = 100;
 const MIN_GHOST_ALT_SEPARATION = 0.9;
@@ -33,6 +35,7 @@ export class GameSession {
   matchHold = 0;
   altError = 0;
   yawError = 0;
+  positionMatched = false;
 
   start(): void {
     this.phase = "playing";
@@ -42,6 +45,7 @@ export class GameSession {
     this.ghostsMatched = 0;
     this.matchHold = 0;
     this.aligning = false;
+    this.positionMatched = false;
     this.ghost = null;
   }
 
@@ -72,8 +76,13 @@ export class GameSession {
     this.altError = Math.abs(player.altitude - this.ghost.altitude);
     this.yawError = angleDiff(player.yaw, this.ghost.yaw);
     const inRange = this.altError <= ALT_MATCH && this.yawError <= YAW_MATCH;
+    const isStill =
+      Math.abs(player.verticalSpeed) <= MAX_MATCH_VERTICAL_SPEED &&
+      Math.abs(player.yawRate) <= MAX_MATCH_YAW_RATE;
 
-    if (inRange) {
+    this.positionMatched = inRange;
+
+    if (inRange && isStill) {
       this.matchHold += dt;
       this.aligning = true;
       if (this.matchHold >= MATCH_HOLD) {

@@ -290,6 +290,13 @@ export function initApp(root: HTMLElement): () => void {
       matchHoldEl.classList.remove("is-hidden");
       matchHoldRing.style.setProperty("--progress", String(game.matchHold / MATCH_HOLD));
       matchHoldTime.textContent = `${remaining.toFixed(1)}s`;
+    } else if (game.ghost && game.positionMatched) {
+      matchHoldEl.classList.add("is-hidden");
+      valStatus.textContent = "Hold still to match";
+      valAltError.textContent = game.altError.toFixed(2) + "m";
+      valAltError.className = "stat-value good";
+      valYawError.textContent = radToDeg(game.yawError);
+      valYawError.className = "stat-value good";
     } else if (game.ghost) {
       matchHoldEl.classList.add("is-hidden");
       valStatus.textContent = game.penalizing ? "− Points" : "Align to ghost";

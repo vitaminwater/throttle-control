@@ -14,6 +14,8 @@ export interface GhostTarget {
 export interface PlayerState {
   altitude: number;
   yaw: number;
+  verticalSpeed: number;
+  yawRate: number;
 }
 
 export const HOVER_ALTITUDE = 2;
@@ -35,6 +37,8 @@ export class QuadcopterScene {
 
   private yawAngle = 0;
   private altitude = HOVER_ALTITUDE;
+  private verticalSpeed = 0;
+  private yawRate = 0;
   private ghostTarget: GhostTarget | null = null;
   private holdRing: THREE.Mesh | null = null;
   private alignRingPlayer: THREE.Mesh;
@@ -104,7 +108,12 @@ export class QuadcopterScene {
   }
 
   getPlayerState(): PlayerState {
-    return { altitude: this.altitude, yaw: this.yawAngle };
+    return {
+      altitude: this.altitude,
+      yaw: this.yawAngle,
+      verticalSpeed: this.verticalSpeed,
+      yawRate: this.yawRate,
+    };
   }
 
   setGhostTarget(target: GhostTarget | null): void {
@@ -161,15 +170,17 @@ export class QuadcopterScene {
   }
 
   update(state: DroneState, dt: number): void {
-    this.yawAngle += state.yaw * 2.5 * dt;
+    this.yawRate = state.yaw * 2.5;
 
     const throttleDelta = state.throttlePosition - TARGET_THROTTLE;
-    const verticalSpeed =
+    this.verticalSpeed =
       Math.sign(throttleDelta) *
       Math.pow(Math.abs(throttleDelta) * 2, 1.1) *
       CLIMB_SPEED *
       0.55;
-    this.altitude = clamp(this.altitude + verticalSpeed * dt, MIN_ALTITUDE, MAX_ALTITUDE);
+    this.altitude = clamp(this.altitude + this.verticalSpeed * dt, MIN_ALTITUDE, MAX_ALTITUDE);
+
+    this.yawAngle += this.yawRate * dt;
 
     this.drone.position.y = this.altitude;
     this.drone.rotation.y = this.yawAngle;
