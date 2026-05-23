@@ -1,5 +1,3 @@
-const STORAGE_KEY = "throttle-control-channel-mapping";
-
 export interface ChannelMapping {
   throttleAxis: number;
   throttleInvert: boolean;
@@ -11,29 +9,6 @@ export type CalibrationStep = "throttle" | "yaw" | "done";
 
 const CAL_HOLD = 0.8;
 const CAL_THRESHOLD = 0.75;
-
-export function loadMapping(): ChannelMapping | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw) as ChannelMapping;
-    if (
-      typeof data.throttleAxis !== "number" ||
-      typeof data.yawAxis !== "number" ||
-      typeof data.throttleInvert !== "boolean" ||
-      typeof data.yawInvert !== "boolean"
-    ) {
-      return null;
-    }
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-export function saveMapping(mapping: ChannelMapping): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(mapping));
-}
 
 export class CalibrationSession {
   step: CalibrationStep = "throttle";
@@ -88,7 +63,6 @@ export class CalibrationSession {
       yawAxis: axis.index,
       yawInvert: axis.raw < 0,
     };
-    saveMapping(mapping);
     this.step = "done";
     return mapping;
   }
