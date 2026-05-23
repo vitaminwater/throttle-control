@@ -3,7 +3,7 @@ import {
   buildMapping,
   type ChannelMapping,
 } from "./calibration";
-import { GameSession, MATCH_HOLD } from "./game";
+import { ALT_MATCH, GameSession, MATCH_HOLD, YAW_MATCH } from "./game";
 import { InputManager, type ProcessedInput } from "./gamepad";
 import { QuadcopterScene } from "./quadcopter";
 import "./style.css";
@@ -294,9 +294,9 @@ export function initApp(root: HTMLElement): () => void {
       matchHoldEl.classList.add("is-hidden");
       valStatus.textContent = game.penalizing ? "− Points" : "Align to ghost";
       valAltError.textContent = game.altError.toFixed(2) + "m";
-      valAltError.className = `stat-value ${game.altError <= 0.25 ? "good" : game.altError <= 0.6 ? "warn" : "bad"}`;
+      valAltError.className = `stat-value ${game.altError <= ALT_MATCH ? "good" : game.altError <= ALT_MATCH * 2.5 ? "warn" : "bad"}`;
       valYawError.textContent = radToDeg(game.yawError);
-      valYawError.className = `stat-value ${game.yawError <= 0.25 ? "good" : game.yawError <= 0.6 ? "warn" : "bad"}`;
+      valYawError.className = `stat-value ${game.yawError <= YAW_MATCH ? "good" : game.yawError <= YAW_MATCH * 2.5 ? "warn" : "bad"}`;
     }
 
     const yawPct = ((input.yaw + 1) / 2) * 100;
