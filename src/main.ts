@@ -1,5 +1,6 @@
 import {
-  CalibrationSession,
+  buildMapping,
+  detectStickAtMax,
   type ChannelMapping,
 } from "./calibration";
 import { GameSession, MATCH_HOLD } from "./game";
@@ -7,7 +8,12 @@ import { InputManager, type ProcessedInput } from "./gamepad";
 import { QuadcopterScene } from "./quadcopter";
 import "./style.css";
 
-type SetupPhase = "intro" | "calibrating" | "ready";
+type SetupPhase =
+  | "intro"
+  | "cal-throttle"
+  | "center-yaw"
+  | "cal-yaw"
+  | "ready";
 
 function formatTime(seconds: number): string {
   return `${Math.ceil(seconds)}s`;
@@ -19,7 +25,7 @@ function radToDeg(rad: number): string {
 
 export function initApp(root: HTMLElement): () => void {
   let setupPhase: SetupPhase = "intro";
-  let calibration: CalibrationSession | null = null;
+  let throttleChannel: { index: number; invert: boolean } | null = null;
 
   root.innerHTML = `
     <div id="canvas-container"></div>
@@ -68,25 +74,41 @@ export function initApp(root: HTMLElement): () => void {
         <div id="bar-marker" class="bar-marker"></div>
       </div>
     </div>
+
     <div id="overlay-intro" class="overlay">
       <div class="overlay-card">
         <h1>Controller Setup</h1>
-        <p>Center your throttle and yaw sticks, then calibrate so the game knows which channels to use.</p>
+        <p>Center all sticks on your controller.</p>
         <p class="cal-hint" id="intro-hint">Connect your controller and move a stick to activate it.</p>
-        <button type="button" id="btn-calibrate" class="btn-start">Calibrate</button>
+        <button type="button" id="btn-calibrate-throttle" class="btn-start">Calibrate</button>
       </div>
     </div>
-    <div id="overlay-cal" class="overlay is-hidden">
+
+    <div id="overlay-cal-throttle" class="overlay is-hidden">
       <div class="overlay-card">
-        <h1>Calibrating</h1>
-        <p class="cal-step" id="cal-step">Step 1 of 2</p>
-        <p id="cal-text">Move your throttle stick to 100% and hold it.</p>
-        <p class="cal-hint" id="cal-hint">Keep the stick at 100% until the bar fills.</p>
-        <div class="cal-progress">
-          <div id="cal-progress-fill" class="cal-progress-fill"></div>
-        </div>
+        <h1>Throttle</h1>
+        <p>Move your <strong>throttle</strong> stick to 100%.</p>
+        <p class="cal-hint" id="cal-throttle-hint">Waiting for input…</p>
       </div>
     </div>
+
+    <div id="overlay-center-yaw" class="overlay is-hidden">
+      <div class="overlay-card">
+        <h1>Controller Setup</h1>
+        <p>Center all sticks on your controller.</p>
+        <p class="cal-hint">Throttle channel recorded.</p>
+        <button type="button" id="btn-calibrate-yaw" class="btn-start">Calibrate yaw</button>
+      </div>
+    </div>
+
+    <div id="overlay-cal-yaw" class="overlay is-hidden">
+      <div class="overlay-card">
+        <h1>Yaw</h1>
+        <p>Move your <strong>yaw</strong> stick to 100%.</p>
+        <p class="cal-hint" id="cal-yaw-hint">Waiting for input…</p>
+      </div>
+    </div>
+
     <div id="overlay" class="overlay is-hidden">
       <div class="overlay-card">
         <h1>Throttle Hold</h1>
@@ -110,56 +132,51 @@ export function initApp(root: HTMLElement): () => void {
   const valScore = root.querySelector("#val-score") as HTMLElement;
   const valMatched = root.querySelector("#val-matched") as HTMLElement;
   const barMarker = root.querySelector("#bar-marker") as HTMLElement;
+
   const overlayIntro = root.querySelector("#overlay-intro") as HTMLElement;
   const introHint = root.querySelector("#intro-hint") as HTMLElement;
-  const btnCalibrate = root.querySelector("#btn-calibrate") as HTMLButtonElement;
-  const overlayCal = root.querySelector("#overlay-cal") as HTMLElement;
-  const calStep = root.querySelector("#cal-step") as HTMLElement;
-  const calText = root.querySelector("#cal-text") as HTMLElement;
-  const calHint = root.querySelector("#cal-hint") as HTMLElement;
-  const calProgressFill = root.querySelector("#cal-progress-fill") as HTMLElement;
+  const btnCalibrateThrottle = root.querySelector("#btn-calibrate-throttle") as HTMLButtonElement;
+
+  const overlayCalThrottle = root.querySelector("#overlay-cal-throttle") as HTMLElement;
+  const calThrottleHint = root.querySelector("#cal-throttle-hint") as HTMLElement;
+
+  const overlayCenterYaw = root.querySelector("#overlay-center-yaw") as HTMLElement;
+  const btnCalibrateYaw = root.querySelector("#btn-calibrate-yaw") as HTMLButtonElement;
+
+  const overlayCalYaw = root.querySelector("#overlay-cal-yaw") as HTMLElement;
+  const calYawHint = root.querySelector("#cal-yaw-hint") as HTMLElement;
+
   const overlay = root.querySelector("#overlay") as HTMLElement;
   const overlayText = root.querySelector("#overlay-text") as HTMLElement;
   const overlayScore = root.querySelector("#overlay-score") as HTMLElement;
   const btnStart = root.querySelector("#btn-start") as HTMLButtonElement;
 
-  const syncIntroUI = (): void => {
-    const gp = inputManager.getGamepadState();
-    introHint.textContent = gp.connected
-      ? "Sticks centered? Click Calibrate to begin."
-      : "Connect your controller and move a stick to activate it.";
+  const hideAllOverlays = (): void => {
+    overlayIntro.classList.add("is-hidden");
+    overlayCalThrottle.classList.add("is-hidden");
+    overlayCenterYaw.classList.add("is-hidden");
+    overlayCalYaw.classList.add("is-hidden");
+    overlay.classList.add("is-hidden");
   };
 
-  const syncCalibrationUI = (): void => {
-    if (!calibration) return;
-
-    calStep.textContent = calibration.getStepLabel();
-    calText.textContent = calibration.getInstruction();
-
-    const gp = inputManager.getGamepadState();
-    calHint.textContent = gp.connected
-      ? calibration.getHint()
-      : "Connect your controller and move a stick to activate it.";
-
-    const target = calibration.getHoldTarget();
-    calProgressFill.style.width = `${(calibration.holdProgress / target) * 100}%`;
+  const showOverlay = (el: HTMLElement): void => {
+    hideAllOverlays();
+    el.classList.remove("is-hidden");
   };
 
   const finishCalibration = (mapping: ChannelMapping): void => {
     inputManager.setMapping(mapping);
     setupPhase = "ready";
-    overlayCal.classList.add("is-hidden");
+    showOverlay(overlay);
     syncOverlay();
   };
 
   const syncOverlay = (): void => {
-    if (setupPhase !== "ready") {
-      overlay.classList.add("is-hidden");
-      return;
-    }
+    if (setupPhase !== "ready") return;
 
     const show = game.phase === "idle" || game.phase === "finished";
     overlay.classList.toggle("is-hidden", !show);
+    if (!show) return;
 
     if (game.phase === "idle") {
       overlayText.textContent =
@@ -174,40 +191,54 @@ export function initApp(root: HTMLElement): () => void {
     }
   };
 
-  let lastTime = performance.now();
-  let frameId = 0;
-  let prevPhase = game.phase;
-
-  btnCalibrate.addEventListener("click", (e) => {
+  btnCalibrateThrottle.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    setupPhase = "calibrating";
-    calibration = new CalibrationSession();
-    overlayIntro.classList.add("is-hidden");
-    overlayCal.classList.remove("is-hidden");
-    syncCalibrationUI();
+    setupPhase = "cal-throttle";
+    showOverlay(overlayCalThrottle);
+  });
+
+  btnCalibrateYaw.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setupPhase = "cal-yaw";
+    showOverlay(overlayCalYaw);
   });
 
   btnStart.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     game.start();
-    prevPhase = "playing";
     syncOverlay();
   });
 
+  let prevPhase = game.phase;
+
   const updateUI = (input: ProcessedInput): void => {
-    if (setupPhase === "intro") {
-      syncIntroUI();
-      return;
-    }
-
-    if (setupPhase === "calibrating") {
-      syncCalibrationUI();
-      return;
-    }
-
     const gp = inputManager.getGamepadState();
+
+    if (setupPhase === "intro") {
+      introHint.textContent = gp.connected
+        ? "When ready, click Calibrate."
+        : "Connect your controller and move a stick to activate it.";
+      return;
+    }
+
+    if (setupPhase === "cal-throttle") {
+      calThrottleHint.textContent = gp.connected
+        ? "Waiting for throttle at 100%…"
+        : "Connect your controller and move a stick to activate it.";
+      return;
+    }
+
+    if (setupPhase === "cal-yaw") {
+      calYawHint.textContent = gp.connected
+        ? "Waiting for yaw at 100%…"
+        : "Connect your controller and move a stick to activate it.";
+      return;
+    }
+
+    if (setupPhase !== "ready") return;
 
     if (game.phase !== "playing") {
       valStatus.textContent = gp.connected ? "Ready" : "W/S throttle · A/D yaw";
@@ -240,14 +271,28 @@ export function initApp(root: HTMLElement): () => void {
     valScore.classList.toggle("penalizing", game.penalizing && !game.aligning);
   };
 
+  let lastTime = performance.now();
+  let frameId = 0;
+
   const loop = (time: number): void => {
     const dt = Math.min((time - lastTime) / 1000, 0.05);
     lastTime = time;
 
-    if (setupPhase === "calibrating" && calibration) {
-      const mapping = calibration.update(dt, inputManager.getActiveGamepad());
-      if (mapping) {
-        finishCalibration(mapping);
+    const gp = inputManager.getActiveGamepad();
+
+    if (setupPhase === "cal-throttle" && gp) {
+      const detected = detectStickAtMax(gp.axes);
+      if (detected) {
+        throttleChannel = detected;
+        setupPhase = "center-yaw";
+        showOverlay(overlayCenterYaw);
+      }
+    }
+
+    if (setupPhase === "cal-yaw" && gp && throttleChannel) {
+      const detected = detectStickAtMax(gp.axes, throttleChannel.index);
+      if (detected) {
+        finishCalibration(buildMapping(throttleChannel, detected));
       }
     }
 
@@ -255,16 +300,12 @@ export function initApp(root: HTMLElement): () => void {
     const controlsLocked = setupPhase !== "ready" || game.phase !== "playing";
 
     scene.update(
-      {
-        yaw: controlsLocked ? 0 : input.yaw,
-        throttlePosition: controlsLocked ? 0.5 : input.throttlePosition,
-      },
+      { yaw: controlsLocked ? 0 : input.yaw, throttlePosition: controlsLocked ? 0.5 : input.throttlePosition },
       dt,
     );
 
     if (setupPhase === "ready") {
-      const player = scene.getPlayerState();
-      game.update(dt, input, player);
+      game.update(dt, input, scene.getPlayerState());
       scene.setGhostTarget(game.ghost);
 
       if (game.phase === "finished" && prevPhase === "playing") {
