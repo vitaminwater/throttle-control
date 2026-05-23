@@ -46,7 +46,7 @@ function readGamepadAxes(gamepad: Gamepad): StickInput {
   const axes = gamepad.axes;
 
   return {
-    yaw: normalizeAxis(axes[2] ?? 0),
+    yaw: normalizeAxis(-(axes[2] ?? 0)),
     throttle: readThrottle(axes[4] ?? 0),
   };
 }
@@ -118,8 +118,8 @@ export class InputManager {
 
     if (this.keysDown.has("KeyW")) throttle = clamp(throttle + step, -1, 1);
     if (this.keysDown.has("KeyS")) throttle = clamp(throttle - step, -1, 1);
-    if (this.keysDown.has("KeyA")) yaw = clamp(yaw - step, -1, 1);
-    if (this.keysDown.has("KeyD")) yaw = clamp(yaw + step, -1, 1);
+    if (this.keysDown.has("KeyA")) yaw = clamp(yaw + step, -1, 1);
+    if (this.keysDown.has("KeyD")) yaw = clamp(yaw - step, -1, 1);
 
     const decay = 0.92;
     if (!this.keysDown.has("KeyW") && !this.keysDown.has("KeyS")) throttle *= decay;

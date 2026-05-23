@@ -6,10 +6,20 @@ export interface DroneState {
   throttlePosition: number;
 }
 
-const HOVER_ALTITUDE = 2;
-const MIN_ALTITUDE = 0.6;
-const MAX_ALTITUDE = 6;
-const CLIMB_SPEED = 2.5;
+export interface GhostTarget {
+  altitude: number;
+  yaw: number;
+}
+
+export interface PlayerState {
+  altitude: number;
+  yaw: number;
+}
+
+export const HOVER_ALTITUDE = 2;
+export const MIN_ALTITUDE = 0.6;
+export const MAX_ALTITUDE = 6;
+const CLIMB_SPEED = 7;
 const CAMERA_HEIGHT_OFFSET = 1.2;
 const CAMERA_DISTANCE = 7;
 
@@ -19,11 +29,13 @@ export class QuadcopterScene {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private drone: THREE.Group;
+  private ghost: THREE.Group;
   private propellers: THREE.Group[] = [];
   private animationId = 0;
 
   private yawAngle = 0;
   private altitude = HOVER_ALTITUDE;
+  private ghostTarget: GhostTarget | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -48,17 +60,40 @@ export class QuadcopterScene {
 
     this.setupLights();
     this.createGround();
-    this.drone = this.createQuadcopter();
+    this.drone = this.buildDrone(false);
+    this.ghost = this.buildDrone(true);
+    this.ghost.visible = false;
     this.scene.add(this.drone);
+    this.scene.add(this.ghost);
 
     window.addEventListener("resize", this.onResize);
     this.animate();
   }
 
+  getPlayerState(): PlayerState {
+    return { altitude: this.altitude, yaw: this.yawAngle };
+  }
+
+  setGhostTarget(target: GhostTarget | null): void {
+    this.ghostTarget = target;
+    if (!target) {
+      this.ghost.visible = false;
+      return;
+    }
+    this.ghost.visible = true;
+    this.ghost.position.y = target.altitude;
+    this.ghost.rotation.y = target.yaw;
+  }
+
   update(state: DroneState, dt: number): void {
     this.yawAngle += state.yaw * 2.5 * dt;
 
-    const verticalSpeed = (state.throttlePosition - TARGET_THROTTLE) * CLIMB_SPEED;
+    const throttleDelta = state.throttlePosition - TARGET_THROTTLE;
+    const verticalSpeed =
+      Math.sign(throttleDelta) *
+      Math.pow(Math.abs(throttleDelta) * 2, 1.1) *
+      CLIMB_SPEED *
+      0.55;
     this.altitude = clamp(this.altitude + verticalSpeed * dt, MIN_ALTITUDE, MAX_ALTITUDE);
 
     this.drone.position.y = this.altitude;
@@ -69,8 +104,11 @@ export class QuadcopterScene {
       prop.rotation.y += propSpeed;
     }
 
-    this.camera.position.set(0, this.altitude + CAMERA_HEIGHT_OFFSET, CAMERA_DISTANCE);
-    this.camera.lookAt(0, this.altitude, 0);
+    const lookY = this.ghostTarget
+      ? (this.altitude + this.ghost.position.y) / 2
+      : this.altitude;
+    this.camera.position.set(0, lookY + CAMERA_HEIGHT_OFFSET, CAMERA_DISTANCE);
+    this.camera.lookAt(0, lookY, 0);
   }
 
   dispose(): void {
@@ -78,6 +116,109 @@ export class QuadcopterScene {
     window.removeEventListener("resize", this.onResize);
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
+  }
+
+  private buildDrone(isGhost: boolean): THREE.Group {
+    const group = new THREE.Group();
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: isGhost ? 0x4fc3f7 : 0x37474f,
+      roughness: 0.4,
+      metalness: 0.5,
+      transparent: isGhost,
+      opacity: isGhost ? 0.4 : 1,
+      emissive: isGhost ? 0x0288d1 : 0x000000,
+      emissiveIntensity: isGhost ? 0.6 : 0,
+    });
+    const accentMat = new THREE.MeshStandardMaterial({
+      color: isGhost ? 0x81d4fa : 0xff7043,
+      roughness: 0.3,
+      metalness: 0.6,
+      transparent: isGhost,
+      opacity: isGhost ? 0.45 : 1,
+      emissive: isGhost ? 0x039be5 : 0xbf360c,
+      emissiveIntensity: isGhost ? 0.5 : 0.15,
+    });
+    const armMat = new THREE.MeshStandardMaterial({
+      color: isGhost ? 0x4fc3f7 : 0x263238,
+      roughness: 0.5,
+      metalness: 0.4,
+      transparent: isGhost,
+      opacity: isGhost ? 0.35 : 1,
+    });
+    const motorMat = new THREE.MeshStandardMaterial({
+      color: isGhost ? 0x29b6f6 : 0x111820,
+      roughness: 0.6,
+      metalness: 0.7,
+      transparent: isGhost,
+      opacity: isGhost ? 0.4 : 1,
+    });
+    const propMat = new THREE.MeshStandardMaterial({
+      color: isGhost ? 0xb3e5fc : 0xeeeeee,
+      transparent: true,
+      opacity: isGhost ? 0.35 : 0.75,
+      side: THREE.DoubleSide,
+    });
+    const noseMat = new THREE.MeshStandardMaterial({
+      color: isGhost ? 0xe1f5fe : 0xffeb3b,
+      emissive: isGhost ? 0x4fc3f7 : 0xf57f17,
+      emissiveIntensity: isGhost ? 0.8 : 0.4,
+      transparent: isGhost,
+      opacity: isGhost ? 0.5 : 1,
+    });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.5), bodyMat);
+    body.castShadow = !isGhost;
+    group.add(body);
+
+    const topPlate = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.03, 0.35), accentMat);
+    topPlate.position.y = 0.075;
+    group.add(topPlate);
+
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.18, 4), noseMat);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.set(0, 0.04, -0.32);
+    group.add(nose);
+
+    const armPositions: [number, number][] = [
+      [1, -1],
+      [-1, -1],
+      [-1, 1],
+      [1, 1],
+    ];
+
+    for (const [sx, sz] of armPositions) {
+      const mx = sx * 0.85;
+      const mz = sz * 0.85;
+      const angle = Math.atan2(sx, sz);
+
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.9), armMat);
+      arm.position.set(sx * 0.45, 0, sz * 0.45);
+      arm.rotation.y = angle;
+      arm.castShadow = !isGhost;
+      group.add(arm);
+
+      const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 16), motorMat);
+      motor.position.set(mx, 0.05, mz);
+      motor.castShadow = !isGhost;
+      group.add(motor);
+
+      const propHub = new THREE.Group();
+      propHub.position.set(mx, 0.12, mz);
+
+      const bladeGeo = new THREE.BoxGeometry(0.55, 0.012, 0.08);
+      const bladeA = new THREE.Mesh(bladeGeo, propMat);
+      const bladeB = new THREE.Mesh(bladeGeo, propMat);
+      bladeB.rotation.y = Math.PI / 2;
+      propHub.add(bladeA, bladeB);
+
+      if (!isGhost) {
+        this.propellers.push(propHub);
+      }
+      group.add(propHub);
+    }
+
+    return group;
   }
 
   private createSkyGradient(): THREE.Color {
@@ -133,16 +274,12 @@ export class QuadcopterScene {
         }
       `,
     });
-    const sky = new THREE.Mesh(skyGeo, skyMat);
-    this.scene.add(sky);
+    this.scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-    const groundGeo = new THREE.PlaneGeometry(40, 40);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x4caf50,
-      roughness: 0.85,
-      metalness: 0.05,
-    });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40),
+      new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.85, metalness: 0.05 }),
+    );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
@@ -150,87 +287,6 @@ export class QuadcopterScene {
     const grid = new THREE.GridHelper(40, 40, 0x2e7d32, 0x66bb6a);
     grid.position.y = 0.02;
     this.scene.add(grid);
-  }
-
-  private createQuadcopter(): THREE.Group {
-    const group = new THREE.Group();
-
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x37474f,
-      roughness: 0.4,
-      metalness: 0.5,
-    });
-    const accentMat = new THREE.MeshStandardMaterial({
-      color: 0xff7043,
-      roughness: 0.3,
-      metalness: 0.6,
-      emissive: 0xbf360c,
-      emissiveIntensity: 0.15,
-    });
-    const armMat = new THREE.MeshStandardMaterial({ color: 0x263238, roughness: 0.5, metalness: 0.4 });
-    const motorMat = new THREE.MeshStandardMaterial({ color: 0x111820, roughness: 0.6, metalness: 0.7 });
-    const propMat = new THREE.MeshStandardMaterial({
-      color: 0xeeeeee,
-      transparent: true,
-      opacity: 0.75,
-      side: THREE.DoubleSide,
-    });
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.5), bodyMat);
-    body.castShadow = true;
-    group.add(body);
-
-    const topPlate = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.03, 0.35), accentMat);
-    topPlate.position.y = 0.075;
-    group.add(topPlate);
-
-    const nose = new THREE.Mesh(
-      new THREE.ConeGeometry(0.06, 0.18, 4),
-      new THREE.MeshStandardMaterial({ color: 0xffeb3b, emissive: 0xf57f17, emissiveIntensity: 0.4 }),
-    );
-    nose.rotation.x = Math.PI / 2;
-    nose.position.set(0, 0.04, -0.32);
-    group.add(nose);
-
-    const armPositions: [number, number][] = [
-      [1, -1],
-      [-1, -1],
-      [-1, 1],
-      [1, 1],
-    ];
-
-    for (const [sx, sz] of armPositions) {
-      const mx = sx * 0.85;
-      const mz = sz * 0.85;
-      const angle = Math.atan2(sx, sz);
-
-      // Length along Z — rotate to point at motor
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.9), armMat);
-      arm.position.set(sx * 0.45, 0, sz * 0.45);
-      arm.rotation.y = angle;
-      arm.castShadow = true;
-      group.add(arm);
-
-      const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 16), motorMat);
-      motor.position.set(mx, 0.05, mz);
-      motor.castShadow = true;
-      group.add(motor);
-
-      const propHub = new THREE.Group();
-      propHub.position.set(mx, 0.12, mz);
-
-      const bladeGeo = new THREE.BoxGeometry(0.55, 0.012, 0.08);
-      const bladeA = new THREE.Mesh(bladeGeo, propMat);
-      const bladeB = new THREE.Mesh(bladeGeo, propMat);
-      bladeB.rotation.y = Math.PI / 2;
-      propHub.add(bladeA, bladeB);
-
-      this.propellers.push(propHub);
-      group.add(propHub);
-    }
-
-    group.position.y = this.altitude;
-    return group;
   }
 
   private animate = (): void => {
