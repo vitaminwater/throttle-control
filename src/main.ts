@@ -1,6 +1,6 @@
 import {
+  AxisCalibrator,
   buildMapping,
-  detectStickAtMax,
   type ChannelMapping,
 } from "./calibration";
 import { GameSession, MATCH_HOLD } from "./game";
@@ -26,6 +26,8 @@ function radToDeg(rad: number): string {
 export function initApp(root: HTMLElement): () => void {
   let setupPhase: SetupPhase = "intro";
   let throttleChannel: { index: number; invert: boolean } | null = null;
+  const throttleCalibrator = new AxisCalibrator();
+  const yawCalibrator = new AxisCalibrator();
 
   root.innerHTML = `
     <div id="canvas-container"></div>
@@ -194,6 +196,12 @@ export function initApp(root: HTMLElement): () => void {
   btnCalibrateThrottle.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
+    const gp = inputManager.getActiveGamepad();
+    if (!gp) {
+      introHint.textContent = "Connect your controller first, then click Calibrate.";
+      return;
+    }
+    throttleCalibrator.begin(gp.axes);
     setupPhase = "cal-throttle";
     showOverlay(overlayCalThrottle);
   });
@@ -201,6 +209,11 @@ export function initApp(root: HTMLElement): () => void {
   btnCalibrateYaw.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
+    const gp = inputManager.getActiveGamepad();
+    if (!gp) {
+      return;
+    }
+    yawCalibrator.begin(gp.axes);
     setupPhase = "cal-yaw";
     showOverlay(overlayCalYaw);
   });
@@ -225,16 +238,28 @@ export function initApp(root: HTMLElement): () => void {
     }
 
     if (setupPhase === "cal-throttle") {
-      calThrottleHint.textContent = gp.connected
-        ? "Waiting for throttle at 100%…"
-        : "Connect your controller and move a stick to activate it.";
+      const gp = inputManager.getActiveGamepad();
+      if (gp) {
+        const pct = Math.round(throttleCalibrator.getProgress(gp.axes) * 100);
+        calThrottleHint.textContent = gp.connected
+          ? `Move one stick to 100%… (${pct}% of the way)`
+          : "Connect your controller and move a stick to activate it.";
+      } else {
+        calThrottleHint.textContent = "Connect your controller and move a stick to activate it.";
+      }
       return;
     }
 
     if (setupPhase === "cal-yaw") {
-      calYawHint.textContent = gp.connected
-        ? "Waiting for yaw at 100%…"
-        : "Connect your controller and move a stick to activate it.";
+      const gp = inputManager.getActiveGamepad();
+      if (gp) {
+        const pct = Math.round(yawCalibrator.getProgress(gp.axes, throttleChannel?.index ?? null) * 100);
+        calYawHint.textContent = gp.connected
+          ? `Move one stick to 100%… (${pct}% of the way)`
+          : "Connect your controller and move a stick to activate it.";
+      } else {
+        calYawHint.textContent = "Connect your controller and move a stick to activate it.";
+      }
       return;
     }
 
@@ -280,18 +305,20 @@ export function initApp(root: HTMLElement): () => void {
 
     const gp = inputManager.getActiveGamepad();
 
-    if (setupPhase === "cal-throttle" && gp) {
-      const detected = detectStickAtMax(gp.axes);
+    if (setupPhase === "cal-throttle" && gp && throttleCalibrator.isActive()) {
+      const detected = throttleCalibrator.poll(gp.axes);
       if (detected) {
         throttleChannel = detected;
+        throttleCalibrator.reset();
         setupPhase = "center-yaw";
         showOverlay(overlayCenterYaw);
       }
     }
 
-    if (setupPhase === "cal-yaw" && gp && throttleChannel) {
-      const detected = detectStickAtMax(gp.axes, throttleChannel.index);
+    if (setupPhase === "cal-yaw" && gp && throttleChannel && yawCalibrator.isActive()) {
+      const detected = yawCalibrator.poll(gp.axes, throttleChannel.index);
       if (detected) {
+        yawCalibrator.reset();
         finishCalibration(buildMapping(throttleChannel, detected));
       }
     }
